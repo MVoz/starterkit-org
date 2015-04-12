@@ -1,0 +1,136 @@
+## Введение ##
+
+Описание на примере buildroot 2012.02 и Qt Creator 2.5.0 http://get.qt.nokia.com/qtcreator/qt-creator-linux-x86-opensource-2.5.0.bin. Предполагается что buildroot установлен и собран, как описанно в QtBuildroot.
+
+## Базовая настройка ##
+
+Скачиваем бинарный инсталлятор для Linux и устанавливаем
+
+```
+cd ~/work
+wget http://get.qt.nokia.com/qtcreator/qt-creator-linux-x86-opensource-2.5.0.bin
+chmod +x qt-creator-linux-x86-opensource-2.5.0.bin
+./qt-creator-linux-x86-opensource-2.5.0.bin
+```
+установщик предельно прост - жмем Next и соглашаемся с лицензионным соглашением. После запуска Qt Creator
+```
+выбрать в меню вверху Tools -> Options...
+слева выбрать Build & Run
+в появившемся окне перейти на вкладку "Qt Version"
+справа выбрать Add...
+в появившемся окне выберите путь к qmake:
+"/home/sasa/buildroot-2012.02/output/host/usr/bin/qmake"
+```
+в данном случае собранное дерево buildroot находится в моей домашней директории /home/sasa, укажите путь аналогично для своей системы, Atmel в версии Qt я добавил для удобства, вот что должно получиться:
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-1.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-1.png)
+
+далее нужно указать кросскомпилятор
+```
+перейти на вкладку Tool Chains
+нажать справа Add...
+в выпадающем меню выбрать GCC
+Name - можно указать свое описание, например "Atmel armv5"
+Compiler Path выберите путь через Browse... справа "/home/sasa/buildroot-2012.02/output/host/usr/bin/arm-atmel-linux-gnueabi-gcc"
+Debugger в Browse... справа выберите "/home/sasa/buildroot-2012.02/output/host/usr/bin/arm-atmel-linux-gnueabi-gdb"
+в поле ABI в выпадающем меню выбрать "arm-lunux-generic-elf-32bit"
+```
+Для примера - скрин того что описано:
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-2.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-2.png)
+
+## Настройка подключения к плате ##
+
+```
+перейти в меню Tools -> Options...
+слева выбрать Linux Devices
+нажать справа Add... 
+в появившемся окне выбрать Generic Linux device и нажать Start Wizard
+укажите название конфигурации, например sk-sam9g45-oem
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-New-Generic-Linux-Device-Configuration-Setup.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-New-Generic-Linux-Device-Configuration-Setup.png)
+
+после заполнения конфигурации жмем Next, начнется тестирование удаленного устройства (плата должна быть включена), если все прошло успешно, появится окно:
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Device-Test.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Device-Test.png)
+
+по окончании должно получиться что-то подобное:
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-3.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Options-3.png)
+
+если плата не была включена и тестирование прошло неудачно - ничего страшного в этом нет, сохраняйте конфигурацию.
+
+## Выбор проекта ##
+
+В качестве примера будет использован демо-проект из состава Qt
+```
+Открываем меню File -> Open File or Project...
+выбираем проект buildroot-2012.02/output/build/qt-4.7.4/demos/browser/browser.pro
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator.png)
+
+```
+жмем Configure Project
+```
+
+## Настройка проекта ##
+
+```
+На панели слева выбираем browser -> Debug
+Переходим на вкладку Projects -> Build Settings
+должно быть что-то подобное
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator-1.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator-1.png)
+
+Если все нормально - ничего тут менять не нужно
+
+```
+Переходим на вкладку Projects -> Run Settings
+Убираем в Upload files via SFTP галку с incremental deployment срава в Details
+Добавляем в поле Arguments:    -qws
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator-2.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-browser-Qt-Creator-2.png)
+
+Чтобы назначить директорию в которую проект будет скопирован на плате, измените (или добавьте) в файле .pro, например
+```
+target.path = /root/installdir
+INSTALLS += target
+```
+
+Проект готов к сборке и запуску на плате, нажимаем зеленый треугольник Run на панели слева, на плате через некоторое время после сборки должен появиться браузер Qt Demo Browser:
+
+![http://wiki.starterkit-org.googlecode.com/git/images/qtbrowser.png](http://wiki.starterkit-org.googlecode.com/git/images/qtbrowser.png)
+
+Внизу на вкладке 3 Application Output должно быть так
+
+```
+Killing remote process(es)...
+Starting remote process...
+Remote process started.
+```
+
+Звершить программу можно на плате - мышью нажать X в правом верхнем углу окна приложения, либо удаленно - нажав красный квадрат в окне 3 Application Output:
+
+```
+Killing remote process(es)...
+Terminated
+```
+
+## Удаленная отладка приложения ##
+
+```
+В меню слева выбираем Debug
+переходим в редакторе к файлу main.cpp
+устанавливаем точку останова - правая кнопка мыши в нужной точке -> Set breakpoint at line 50 в появившемся меню
+жмем Start Debugging
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-main.cpp-browser-Qt-Creator.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-main.cpp-browser-Qt-Creator.png)
+
+Проект загрузится на плату, запустится и остановится в выбранной точке
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-main.cpp-browser-Qt-Creator-1.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-main.cpp-browser-Qt-Creator-1.png)

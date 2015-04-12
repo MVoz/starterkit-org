@@ -1,0 +1,87 @@
+# Введение #
+
+Иногда возникает [необходимость использования watchdog](http://starterkit.ru/html/index.php?name=forum&op=view&id=17679). Здесь описана последовательность действий для его включения для платы SK-MAT91SAM9G45.
+
+# Настройка, специфичная для платы #
+
+## Bootstrap ##
+
+Таймер включается и выключается в bootstrap. [В дальнейшем возможно только его использование.](http://starterkit.ru/html/index.php?name=forum&op=view&id=17679#17680) Для изменения состояния необходимо менять код загрузчика и [пересобирать](Bootstrap.md) его.
+
+### AT91Bootstrap ###
+
+Конфигурация, примерно как и для ядра, задаётся в board-файлах. В файле board/at91sam9g45ek/at91sam9g45ek.c надо закомментировать строку, отключающую watchdog:
+```
+    /*
+     * Disable watchdog.
+     */
+    writel(AT91C_WDTC_WDDIS, AT91C_BASE_WDTC + WDTC_WDMR);
+```
+Как видно, она снабжена соответствующим комментарием.
+
+При загрузке с SD AT91Bootstrap сам грузит ядро, так что, этого измененния достаточно.
+
+### sk\_mat91sam9g45 bootstrap ###
+
+Этот bootstrap используется для загрузки с NAND. Изменения надо вносить в at91lib/boards/at91sam9m10-ek/board\_lowlevel.c:
+```
+    /* Watchdog initialization
+     *************************/
+#ifndef WDT_APP // Watchdog init in application ?
+    AT91C_BASE_WDTC->WDTC_WDMR = AT91C_WDTC_WDDIS;
+#endif
+```
+Тут тоже всё откомментировано и достаточно понятно. Строку достаточно закомментировать. Директивы препроцессора становятся не нужны, так что комментировать можно и их.
+
+## U-Boot ##
+
+[U-Boot](UBoot.md), в рассматриваемом случае, используется только при загрузке с NAND. В принципе, сам по себе, этот загрузчик в процессе не участвует, но, при его работе, уже требуется регулярный сброс watchdog-таймера во избежание перезагрузки. U-Boot 2010.09, в принцие, содержит соответствующий код, но обнаружена, по крайней мере, [одна проблема](http://wiki.starterkit.ru/uboot). Как видно из [патча](http://starterkit.ru/html/index.php?name=files&op=view&id=13), касается это драйвера `ATMEL DataFlash` и, соответственно, должно проявляться при продолжительной работе с этим видом памяти.
+
+# Общие настройки #
+
+Далее описываются настройки ядра и системной утилиты сброса таймера, которые не привязаны к конкретной плате.
+
+## Ядро ##
+
+В ядре следует выбрать модуль, соответствующий имеющемуся в наличии:
+```
+ Device Drivers  --->
+    [*] Watchdog Timer Support  --->
+         --- Watchdog Timer Support
+         [*]   WatchDog Timer Driver Core
+         [*]   Disable watchdog shutdown on close
+               *** Watchdog Device Drivers ***
+         [ ]   Software watchdog
+         [*]   AT91SAM9X / AT91CAP9 watchdog
+         [ ]   Synopsys DesignWare watchdog
+         [ ]   Max63xx watchdog
+               *** USB-based Watchdog Cards ***
+         [ ]   Berkshire Products USB-PC Watchdog
+```
+В данном случае, задана конфигурация watchdog, присутствующего у AT91SAM9, на котором собрана и плата SK-MAT91SAM9G45. Если watchdog активизировался, в логе загрузки ядра можно увидеть
+```
+at91sam9_wdt: enabled (heartbeat=15 sec, nowayout=1)
+```
+
+## Watchdog ##
+
+В системе должен быть загружен процесс, который, периодически, сбрасывает watchdog-таймер для предотвращения перезагрузки. Им может быть, например, такой:
+```
+# watchdog --help
+BusyBox v1.20.2 (2013-01-05 14:06:25 SAMT) multi-call binary.
+```
+В запущенном виде он выглядит так:
+```
+# ps ax|grep watchdog
+  395 root     watchdog -t 60 /dev/watchdog
+```
+При сборке в составе [buildroot](QtBuildroot.md), конфигурация этого варианта задаётся при запуске из /etc/init.d/S15watchdog. Чтобы watchdog собрался в составе rootfs посредством [buildroot](QtBuildroot.md), при конфигурировании следует выбрать (пример для 2012.11):
+```
+Package Selection for the target  --->
+     -*- BusyBox
+           BusyBox Version (BusyBox 1.20.x)  --->
+     (package/busybox/busybox-1.20.x.config) BusyBox configuration file to use? (NEW)
+```
+Так же следует убедиться, что в busybox-1.20.x.config присутствует CONFIG\_WATCHDOG=y
+
+_Не очень понятный момент. Если обратить внимание на запущенный watchdog и на вывод сообщения ядра, можно увидеть несоответствие. По идее, watchdog должен быть запущен с -t меньше 15. Но конфиг по-умолчанию я сразу не исправил, после чего обнаружил, что работает и в таком виде._

@@ -1,0 +1,132 @@
+## Введение ##
+
+Рассмотрены два примера - когда проект отлажен на SD и его нужно перенести на NAND и второй когда корневая ФС собрана в buildroot и ее нужно записать на NAND. Предполагается что выполнены манипуляции с ключами SSH как описано тут RemoteBoard.
+
+## Процесс загрузки ##
+
+Когда мы размыкаем перемычку NAND CS то фактически отключаем NAND, чтобы она была доступна в ядре нужно перед инициализацией ядра но после запуска загрузчика с SD установить перемычку обратно, для этого в загрузчике сделана небольшая задержка (4 сек) - нужно успеть за это время устаноить перемычку NAND CS. Процесс загрузки можно проконтролировать в терминале работающем через последовательный порт
+```
+relocating linux kernel to proper address, dst: 0x70008000, src: 0x72000040, len: 0x245b70, machid: 0x8a4
+....   <-- индикатор задержки
+Starting linux kernel ..., machid: 0x8a4, tags: 0x70000100
+```
+Если вы успели замкнуть перемычку, в логе загрузки ядра появятся такие строки
+```
+...
+atmel_nand atmel_nand: Using dma0chan0 for DMA transfers.
+NAND device: Manufacturer ID: 0xec, Chip ID: 0xda (Samsung NAND 256MiB 3,3V 8-bit)
+Scanning device for bad blocks
+Bad eraseblock 638 at 0x000004fc0000
+Bad eraseblock 1062 at 0x0000084c0000
+Bad eraseblock 1400 at 0x00000af00000
+Bad eraseblock 1662 at 0x00000cfc0000
+Bad eraseblock 1796 at 0x00000e080000
+Creating 2 MTD partitions on "atmel_nand":
+0x000000000000-0x000001000000 : "Boot partition"
+0x000001000000-0x000010000000 : "FS partition"
+...
+```
+в системе появятся файлы устройств mtd
+```
+# ls -l /dev | grep mtd
+crw-------    1 root     root       90,   0 Jan  1  1970 mtd0
+crw-------    1 root     root       90,   1 Jan  1  1970 mtd0ro
+crw-------    1 root     root       90,   2 Jan  1  1970 mtd1
+crw-------    1 root     root       90,   3 Jan  1  1970 mtd1ro
+brw-------    1 root     root       31,   0 Jan  1  1970 mtdblock0
+brw-------    1 root     root       31,   1 Jan  1  1970 mtdblock1
+```
+при этом корневая ФС остается пока еще на SD, это можно легко узнать по типу ФС ext2.
+```
+# cat /proc/mounts 
+rootfs / rootfs rw 0 0
+/dev/root / ext2 rw,relatime,errors=continue 0 0
+...
+```
+
+## Копирование ядра и загрузчиков ##
+
+Скачиваем первичный загрузчик (bootstrap) и u-boot
+```
+cd ~/buildroot-2012.02
+wget http://starterkit-org.googlecode.com/files/bootstrap
+wget http://starterkit-org.googlecode.com/files/u-boot.bin
+```
+
+Ядру нужно указать, что корневая ФС находится в NAND, для этого запускаем его конфигуратор
+```
+make linux-menuconfig
+```
+изменяем параметры загрузки
+```
+Boot options ->
+  (console=ttyS0,115200 ubi.mtd=1 root=ubi0:nandfs rw rootfstype=ubifs) Default kernel command string
+    Kernel command line type (Always use the default kernel command string) 
+```
+выходим из конфигуратора и запускаем сборку
+```
+make
+```
+копируем загрузчики и новый имидж ядра на плату в директорию /root
+```
+scp bootstrap root@192.168.0.136:/root
+scp u-boot.bin root@192.168.0.136:/root
+scp output/images/uImage root@192.168.0.136:/root
+```
+если вы хотите записать ФС собранную в buildroot а не пернести с SD, скопируйте её имидж (архив)
+```
+scp output/images/rootfs.tar.gz root@192.168.0.136:/root
+```
+
+## Запись данных на NAND ##
+
+Логинимся в эмуляторе терминала через SSH на плате (можно использовать и терминал через последовательный порт, мне удобней через SSH)
+```
+ssh root@192.168.0.136
+```
+Записываем загрузчики и ядро
+```
+предварительно стираем раздел
+flash_erase /dev/mtd0 0 0
+nandwrite -s 0x0 -p /dev/mtd0 bootstrap
+nandwrite -s 0x20000 -p /dev/mtd0 u-boot.bin
+nandwrite -s 0x80000 -p /dev/mtd0 uImage
+```
+Создание ФС UBIFS на втором (по счету) разделе (если у вас раздел отформатирован - можно пропустить эти действия, это пример как создать ФС с "нуля")
+```
+ubiformat /dev/mtd1
+ubiformat: mtd1 (nand), size 251658240 bytes (240.0 MiB), 1920 eraseblocks of 131072 bytes (128.0 KiB), min. I/O size s
+libscan: scanning eraseblock 1919 -- 100 % complete  
+ubiformat: 1915 eraseblocks have valid erase counter, mean value is 0
+ubiformat: 5 bad eraseblocks found, numbers: 510, 934, 1272, 1534, 1668
+ubiformat: formatting eraseblock 1919 -- 100 % complete  
+```
+```
+ubiattach /dev/ubi_ctrl -m 1
+ubimkvol /dev/ubi0 -N nandfs -s 200MiB
+mount -t ubifs ubi0:nandfs /mnt
+```
+если нужно смонтировать имеющуюся ФС
+```
+ubiattach /dev/ubi_ctrl -m 1
+mount -t ubifs ubi0:nandfs /mnt
+удаляем старые данные
+rm -r /mnt/*
+```
+непосредственно копирование корневой ФС с SD на NAND
+```
+tar -cf - / --exclude dev --exclude proc --exclude sys --exclude tmp --exclude lost+found | tar -xf - -C /mnt
+mkdir /mnt/dev /mnt/proc /mnt/sys /mnt/tmp
+umount /mnt
+```
+если записываете имидж собранный в buildroot, а не переносите с SD
+```
+gunzip -c rootfs.tar.gz | tar -xf - -C /mnt
+umount /mnt
+```
+
+после перезагрузки
+```
+reboot
+```
+плата загрузится с NAND с копией корневой ФС которая была на SD (или собранной в buildroot если вы записывали имидж).

@@ -1,0 +1,108 @@
+## Введение ##
+
+Несколько слов про сборку KK (здесь и далее по тексту КК - кросскомпилятор), если вам по какой-то причине не подходят готовые, например
+http://sourcery.mentor.com/public/gnu_toolchain/
+Протестировано на системе OsSetup
+
+## Описание ##
+
+Чтобы облегчить себе жизнь - воспользуемся средством автоматизации сборки
+http://crosstool-ng.org/
+Далее описание для версии 1.15.2 - это последняя на данный момент.
+Распаковываем, конфигурируем для локального (без установки) использования и собираем скрипты сборки
+```
+mkdir -p ~/work
+cd ~/work
+wget http://crosstool-ng.org/download/crosstool-ng/crosstool-ng-1.15.2.tar.bz2
+tar xjvf crosstool-ng-1.15.2.tar.bz2
+cd crosstool-ng-1.15.2
+./configure --enable-local
+make 
+```
+приступаем к конфигурированию кросскомпилятора (в той же директории куда распаковали скрипты)
+```
+./ct-ng menuconfig
+```
+![http://wiki.starterkit-org.googlecode.com/git/images/ctng.png](http://wiki.starterkit-org.googlecode.com/git/images/ctng.png)
+
+Краткое описание опций на которые стоит обратить внимание (все остальные которые здесь не описаны - оставлены по умолчанию)
+```
+Paths and misc options  --->  
+  [*] Try features marked as EXPERIMENTAL
+  (${HOME}/ctng-atmel) Prefix directory
+```
+открывает доступ в конфигураторе для выбора "экспериментальных" версий binutils, glibc, gcc и пр (например gcc и gdb linaro) Prefix directory - куда будет установлен будущий КК, ${HOME} - означает домашняя директория пользователя от чьего имени собирается КК.
+```
+Target options  ---> 
+  Target Architecture (arm)
+  [*] Use the MMU
+  Endianness: (Little endian)
+  Bitness: (32-bit)
+  (armv5te) Architecture level
+  (arm926ej-s) Tune for CPU
+  Floating point: (software)
+  Default instruction set mode (arm)
+  [*] Use EABI
+```
+это основные настройки нашего кросскомпилятора - в данном случае оптимизируем для процессорного ядра arm926e-js (применимо ко всем процессорам atmel из линейки at91sam9xxx) без VFP.
+```
+Toolchain options  --->
+  (atmel) Tuple's vendor string
+```
+это то что будет фигурировать во втором поле вашего кросскомпилятора (в данном случае получится arm-atmel-linux-gnueabi-gcc)
+```
+Operating System  --->
+  Target OS (linux)
+  Linux kernel version (3.2.16)
+```
+собираем для целевой ОС на базе ядра Linux, заголовки будут взяты от ядра 3.2.16, это еще одна из причин по которой бывает нужен свой кросскомпилятор - выбирайте здесь ядро с которым планируете работать на плате. В данном случае - ядро из ветки 3.2 которая объялена как longterm (с длительной поддержкой) - для нее будут выходит патчи устраняющие критические уязвимости дольше чем для обычных стабильных релизов. Именно такие ядра обычно выбирают для дистрибутивов.
+```
+Binary utilities  --->
+  binutils version (2.22 (EXPERIMENTAL))
+  Linkers to enable (ld)
+```
+на данный момент последний стабильный релиз.
+```
+C compiler  --->
+  [*] Show Linaro versions (EXPERIMENTAL)
+  gcc version (linaro-4.6-2012.04 (EXPERIMENTAL))
+  [*] C++
+  [*] Optimize gcc libs for size 
+```
+выбирайте версию gcc исходя из своих поотребностей, linaro - лично мое предпочтение.
+```
+C-library  --->
+  C library (eglibc)
+  eglibc version (2_13)
+  [*] optimize eglibc for size (-Os)
+```
+eglibc - компактный вариант glibc бинарно совместимый с ним, если у вас не dataflash 4MB - нет никакого смысла возиться в uclibc, рекомендую eglibc, версия 2.13 - последняя с которой вы не испытаете проблем при сборке расширенного варианта busybox - связано это с RPC.
+```
+Debug facilities  --->
+  [*] gdb  ---> 
+    [*]   Cross-gdb
+    -*-   gdbserver
+    [*]     Build a static gdbserver
+    [*]   Show Linaro versions (EXPERIMENTAL)
+    gdb version (linaro-7.4-2012.04 (EXPERIMENTAL))
+```
+это то что вам понадобится при удаленной отладке программ запущенных на плате.
+```
+Companion libraries  --->
+  GMP version (5.0.2)
+  MPFR version (3.1.0)
+  PPL version (0.11.2)
+  CLooG/ppl version (0.15.11)
+  MPC version (0.9)
+```
+выбираем все самое свежее. Далее выбираем Exit и соглашаемся сохранить полученный конфиг. Непосредственно сборка запускается командой
+```
+./ct-ng build
+```
+на моем 2-ядерном селероне 1,8 ГГц, ОЗУ 2 Гб она занимает примерно 40 минут. Конфиг который поучился в результате можно взять тут [atmel.config](http://wiki.starterkit-org.googlecode.com/git/configs/atmel.config)
+
+Добавляем путь к кросскомпилятору в переменную окружения PATH
+```
+echo 'export PATH="~/ctng-atmel/bin:$PATH"' >> ~/.bashrc
+source  ~/.bashrc
+```

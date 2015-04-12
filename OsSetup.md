@@ -1,0 +1,61 @@
+## Введение ##
+
+Описание для Debian/Ubuntu, в частности используется версия Ubuntu 10.04 LTS 32-bit
+http://releases.ubuntu.com/lucid/
+Руководство пользователя Ubuntu 10.04 на русском языке (Pdf версия руководства по Ubuntu 10.04 LTS "Lucid Lynx") можно скачать тут http://help.ubuntu.ru/manual/pdf
+
+## Установка виртуальной машины ##
+
+Скачиваем установщик с https://www.virtualbox.org/wiki/Downloads, на текущий момент для Windows
+```
+VirtualBox 4.1.16 for Windows hosts  x86/amd64 
+```
+
+скачиваем установочный образ по ссылке
+
+http://se.archive.ubuntu.com/mirror/cdimage.ubuntu.com/xubuntu/releases/lucid/release/xubuntu-10.04.2-desktop-i386.iso
+
+Устанавливаем virtalbox - тут все интуитивно понятно. Запускаем его и создаем новую виртуальную машину (кнопка "Создать" на панели), выделяем 512М RAM, под hdd 20G - чтобы не занимать лишнее место на диске, лучше выбрать "Динамический виртуальный диск".
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Create-New-Virtual-Machine-3.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-Create-New-Virtual-Machine-3.png)
+
+Назначаем для CD-ROM образ xubuntu-10.04.2-desktop-i386.iso
+```
+Свойства -> Носители
+  IDE контроллер -> пусто
+    в правой колонке напротив "Привод" нажать иконку с диском
+      "Выбрать образ оптического диска"
+        указываем путь к xubuntu-10.04.2-desktop-i386.iso
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-xubuntu-Settings.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-xubuntu-Settings.png)
+
+Стартуем виртуальную машину. При установке Ubuntu выберите английский язык, отдайте все дисковое постранство под систему. В меню при установке выберите "Install Xubuntu" - не перепутайте с Try (попробовать - система запустится в режиме live CD).
+После установки системы доустановите необходимые пакеты
+
+```
+sudo apt-get install -y build-essential gcc g++ autoconf automake libtool bison flex gettext 
+sudo apt-get install -y patch subversion texinfo wget git-core
+sudo apt-get install -y libncurses5 libncurses5-dev python-dev
+sudo apt-get install -y zlib1g-dev liblzo2-2 liblzo2-dev
+sudo apt-get install -y libacl1 libacl1-dev gawk cvs curl lzma expat libexpat-dev
+sudo apt-get install -y uuid-dev mercurial
+```
+
+Для работы Buildroot желательно установить
+
+```
+sudo apt-get install libglib2.0-dev
+sudo apt-get install libnetpbm10-dev
+sudo apt-get install python-xcbgen
+```
+
+Проверьте что /bin/sh не ссылается на /bin/dash - это чревато проблемами при сбоорке, выберите 
+
+&lt;No&gt;
+
+ в конфигураторе dash
+
+```
+sudo dpkg-reconfigure dash
+```

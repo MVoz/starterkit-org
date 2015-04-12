@@ -1,0 +1,121 @@
+## Введение ##
+
+Сборка протестирована на Ubuntu 10.04 64-bit, Intel(R) Celeron(R) 2 CPU P4500 1.87GHz RAM 8GB и заняла около 1.5 часов, в процессе сборки из исходников потребуется скачать ~6 ГБ данных из Интернет. Android устанавливается на microSD. BSP сделано на основе BSP для QSB от http://www.adeneo.com
+
+## Установка готовых имиджей ##
+
+Для тестирования можно установить готовые имиджи, скачиваем и распаковываем
+```
+mkdir -p ~/work
+cd ~/work
+wget http://starterkit-org.googlecode.com/files/android_img.tar.bz2
+tar xjvf android_img.tar.bz2
+cd android_img/scripts
+```
+
+Смотрим как называется наш диск, куда будем устанавливать
+```
+dmesg
+...
+[ 5748.495632] scsi 23:0:0:0: Direct-Access     Generic- Multi-Card       1.00 PQ: 0 ANSI: 0 CCS
+[ 5748.509955] sd 23:0:0:0: Attached scsi generic sg4 type 0
+[ 5749.178288] sd 23:0:0:0: [sdc] 15523840 512-byte logical blocks: (7.94 GB/7.40 GiB)
+[ 5749.179132] sd 23:0:0:0: [sdc] Write Protect is off
+[ 5749.179140] sd 23:0:0:0: [sdc] Mode Sense: 03 00 00 00
+[ 5749.179988] sd 23:0:0:0: [sdc] No Caching mode page present
+[ 5749.179996] sd 23:0:0:0: [sdc] Assuming drive cache: write through
+[ 5749.184273] sd 23:0:0:0: [sdc] No Caching mode page present
+[ 5749.184280] sd 23:0:0:0: [sdc] Assuming drive cache: write through
+[ 5749.190507]  sdc: sdc1 sdc2 
+[ 5749.195331] sd 23:0:0:0: [sdc] No Caching mode page present
+[ 5749.195339] sd 23:0:0:0: [sdc] Assuming drive cache: write through
+[ 5749.195345] sd 23:0:0:0: [sdc] Attached SCSI removable disk
+```
+
+для упрощения установки воспользуемся скриптом, единственный параметр которого - имя файла устройства на которое устанавливается Android, в данном случае /dev/sdc
+```
+./flash_prebuilt_android.sh /dev/sdc
+```
+
+Для запуска Android нужно скорректировать переменные окружения u-boot установленного в nand платы для загрузки ядра с SD. Для этого остановите загрузку u-boot нажатием любой клавиши в терминале
+```
+Hit any key to stop autoboot:  0 
+EVK U-Boot >
+```
+и введите команды
+```
+setenv 'mmc_read' 'mmc rescan; mmc read 0x70800000 0x800 0x2000; mmc read 0x70D00000 0x3000 0x300' 
+setenv 'bootcmd' 'run mmc_read; bootm 0x70800000 0x70D00000'
+saveenv
+reset
+```
+
+если у вас c u-boot все в порядке - загрузится Android с microSD. Экран должен быть подключен к LVDS0. Для полноценной работы Android с тачскрином требуются дополнительные кнопки - в качестве них задействованы GPIO от тачскрина LVDS1 - GPIO\_3\_19 (PENIRQ) и GPIO\_2\_10 (CS) - работа их не тестировалась, я использую USB-мышь. USB-OTG порт используется только в качестве device (как host не работает) - для adb (не тестировался).
+
+## Сборка Android из исходников ##
+### Подготовка host-системы ###
+
+Официальный мануал
+
+http://source.android.com/source/initializing.html
+
+Устанавливаем необходимые пакеты
+
+```
+sudo apt-get install git-core gnupg flex bison gperf build-essential \
+  zip curl zlib1g-dev libc6-dev lib32ncurses5-dev ia32-libs \
+  x11proto-core-dev libx11-dev lib32readline5-dev lib32z-dev \
+  libgl1-mesa-dev g++-multilib mingw32 tofrodos python-markdown \
+  libxml2-utils xsltproc
+```
+
+Для сборки Android Gingerbread требуется sun-java6-jdk, так как Canonical удалили его из репозиториев Ubuntu и перешли на OpenJDK, требуется установить его вручную, самый простой способ - воспользоваться готовым скриптом для автоматической сборки deb-пакетов с Sun Java 6.
+
+```
+cd ~/
+wget https://github.com/flexiondotorg/oab-java6/raw/0.2.4/oab-java.sh -O oab-java.sh
+chmod +x oab-java.sh
+sudo ./oab-java.sh
+```
+
+после этого можно установить обычным для Ubuntu методом
+```
+sudo apt-get install sun-java6-jdk
+```
+
+### Установка BSP ###
+
+Скачиваем архив с патчами и скриптами
+```
+mkdir -p ~/work
+cd ~/work
+wget http://starterkit-org.googlecode.com/files/i.MX53-SK-Android-Gingerbread-Release4.2.tar.bz2
+tar xjvf i.MX53-SK-Android-Gingerbread-Release4.2.tar.bz2
+```
+скачиваем исходники Android
+```
+cd i.MX53-SK-Android-Gingerbread-Release4.2/scripts/
+./download_android.sh
+```
+накладываем патчи для i.MX53
+```
+./patch_android.sh
+```
+накладываем патчи для платформы QSB (этот скрипт добавит также и starterkit-специфичные патчи)
+```
+./apply_qsb_patch.sh
+```
+
+### Сборка Android ###
+
+Непосредственно сборка, например для host-системы c двухядерным процессором
+```
+./build_android.sh --board=imx53_qsb --build-choice=all --lunch-type=eng --cpus-android=2
+```
+
+запись на SD собранных имиджей аналогично с описанным выше, только название скрипта flash\_android.sh
+```
+./flash_android.sh /dev/sdc
+```
+
+разумется название устройства вам нужно определить на своей системе.

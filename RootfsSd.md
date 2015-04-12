@@ -1,0 +1,215 @@
+## Введение ##
+
+Отладку удобней выполнять на SD - с ней проще работать на host-системе, к тому же вы не нарушите содержимое NAND c "заводской" прошивкой что актуально для начинающих - достаточно установить перемычку NAND CS и система загрузится с "заводскими" установками. Пример разметки, форматирования SD карты и перенос на нее ФС собранной в buildroot. Модуль SK-SAM9G45-OEM загружается с microSD (разъем находится на самом модуле).
+
+## Разметка SD в fdisk ##
+
+Все действия будем выполнять в консоли. При работе на виртуальной машине потребуется USB-кардридер. Чтобы диск обнаружился в гостевой ОС нужно разрешить для нее отображать USB-кардридер - нажать правую кнопку мышки на иконке с изображением USB-коннектора в правом нижнем углу окна в котором запущена виртуальная машина (третья по счету слева иконка) и отметить ваш кардридер, например у меня
+```
+USB Reaer USB Mass Storage Device [0201]
+```
+чтобы узнать название диска - смотрим выхлоп dmesg в терминале - нас интересуют последние записи
+```
+dmesg
+...
+[ 3474.733375] sd 4:0:0:0: Attached scsi generic sg2 type 0
+[ 3474.765677] sd 4:0:0:0: [sdb] 15523840 512-byte logical blocks: (7.94 GB/7.40 GiB)
+[ 3474.775780] sd 4:0:0:0: [sdb] Write Protect is off
+[ 3474.775813] sd 4:0:0:0: [sdb] Mode Sense: 03 00 00 00
+[ 3474.775827] sd 4:0:0:0: [sdb] Assuming drive cache: write through
+[ 3474.824946] sd 4:0:0:0: [sdb] Assuming drive cache: write through
+[ 3474.824978]  sdb: sdb1 sdb2
+[ 3474.868309] sd 4:0:0:0: [sdb] Assuming drive cache: write through
+[ 3474.868335] sd 4:0:0:0: [sdb] Attached SCSI removable disk
+...
+```
+в данном случае мой диск - sdb с двумя первичными разделами sdb1, sdb2. Размонтируем диски (ОС по умолчанию автомонтирует разделы)
+```
+sudo umount /dev/sdb1
+sudo umount /dev/sdb2
+```
+или тоже самое одной командой
+```
+sudo umount /dev/sdb*
+```
+Удаляем таблицу разделов
+```
+sudo dd if=/dev/zero of=/dev/sdb bs=512 count=1 && sync
+```
+создаем новую таблицу разделов
+```
+sudo fdisk /dev/sdb
+Device contains neither a valid DOS partition table, nor Sun, SGI or OSF disklabel
+Building a new DOS disklabel with disk identifier 0x9a024f28.
+Changes will remain in memory only, until you decide to write them.
+After that, of course, the previous content won't be recoverable.
+
+Warning: invalid flag 0x0000 of partition table 4 will be corrected by w(rite)
+
+WARNING: DOS-compatible mode is deprecated. It's strongly recommended to
+         switch off the mode (command 'c') and change display units to
+         sectors (command 'u').
+
+Command (m for help): 
+```
+смотрим какие есть команды
+```
+Command (m for help): m
+Command action
+   a   toggle a bootable flag
+   b   edit bsd disklabel
+   c   toggle the dos compatibility flag
+   d   delete a partition
+   l   list known partition types
+   m   print this menu
+   n   add a new partition
+   o   create a new empty DOS partition table
+   p   print the partition table
+   q   quit without saving changes
+   s   create a new empty Sun disklabel
+   t   change a partition's system id
+   u   change display/entry units
+   v   verify the partition table
+   w   write table to disk and exit
+   x   extra functionality (experts only)
+```
+смотрим нашу пустую таблицу разделов
+```
+Command (m for help): p
+
+Disk /dev/sdb: 7948 MB, 7948206080 bytes
+245 heads, 62 sectors/track, 1021 cylinders
+Units = cylinders of 15190 * 512 = 7777280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x9a024f28
+
+   Device Boot      Start         End      Blocks   Id  System
+```
+Создаем первичный раздел 16M
+```
+Command (m for help): n
+Command action
+   e   extended
+   p   primary partition (1-4)
+p
+Partition number (1-4): 1
+First cylinder (1-1021, default 1): 
+Using default value 1
+Last cylinder, +cylinders or +size{K,M,G} (1-1021, default 1021): +16M
+
+Command (m for help): 
+```
+Создаем второй первичный раздел. В случае, если двух разделов достаточно, можно отдать под него всё оставшееся место, но может возникнуть ситуация, когда нужен swap раздел (например, при работе с rootfs, созданных на базе универсальных дистрибутивов), в этом случае, следует оставить соответствующее место для третьего раздела. Третий раздел создаётся так же.
+```
+Command (m for help): n
+Command action
+   e   extended
+   p   primary partition (1-4)
+p
+Partition number (1-4): 2
+First cylinder (4-1021, default 4): 
+Using default value 4
+Last cylinder, +cylinders or +size{K,M,G} (4-1021, default 1021): 
+Using default value 1021
+
+Command (m for help): 
+```
+Назначаем тип первому разделу
+```
+Command (m for help): t
+Partition number (1-4): 1
+Hex code (type L to list codes): b
+Changed system type of partition 1 to b (W95 FAT32)
+
+Command (m for help):
+```
+Назначаем тип второму разделу
+```
+Command (m for help): t   
+Partition number (1-4): 2
+Hex code (type L to list codes): 83
+Changed system type of partition 2 to 83 (Linux)
+
+Command (m for help): 
+```
+Если сделали раздел для swap, назначаем тип ему.
+```
+Command (m for help): t   
+Partition number (1-4): 3
+Hex code (type L to list codes): 82
+Changed system type of partition 3 to 82 (Linux swap / Solaris)
+
+Command (m for help):
+```
+Cмотрим новую таблицу разделов (показано без раздела swap)
+```
+Command (m for help): p
+
+Disk /dev/sdb: 7948 MB, 7948206080 bytes
+245 heads, 62 sectors/track, 1021 cylinders
+Units = cylinders of 15190 * 512 = 7777280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x9a024f28
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sdb1               1           3       22754    b  W95 FAT32
+/dev/sdb2               4        1021     7731710   83  Linux
+```
+сохраняем изменения и выходим из программы.
+```
+Command (m for help): w
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+
+WARNING: If you have created or modified any DOS 6.x
+partitions, please see the fdisk manual page for additional
+information.
+Syncing disks.
+```
+Форматируем первый раздел в fat32
+```
+sudo mkfs.vfat /dev/sdb1
+```
+Второй раздел в ext2
+```
+sudo mkfs.ext2 /dev/sdb2
+```
+Третий раздел, если есть, подготавливаем, как swap
+```
+mkswap /dev/sdb3
+```
+копируем загрузчик, ядро и корневую ФС на SD
+```
+cd ~/buildroot-2012.02/
+wget http://starterkit-org.googlecode.com/files/BOOT.BIN
+sudo mount /dev/sdb1 /mnt
+sudo cp BOOT.BIN /mnt
+sudo cp output/images/uImage /mnt
+sudo umount /mnt
+sudo mount /dev/sdb2 /mnt
+sudo tar xzvf output/images/rootfs.tar.gz -C /mnt
+sudo umount /mnt
+```
+
+Чтобы загрузка пошла с microSD - удалите перемычку NAND CS на модуле.
+
+Несколько замечаний.<br><br>
+1. Название ядра, в данном случае, uImage, должно соответствовать тому, что определено в BOOT.BIN. Загрузчик может предполагать использование и какого-то другого названия.<br><br>
+2. Строка параметров для ядра задаётся в загрузчике, но ядро может быть собрано с параметром CONFIG_CMDLINE_FORCE=y, в этом случае, строка параметров из загрузчика будет проигнорирована, и будет использован набор параметров, заданный при сборке ядра.<br>
+<i>(Строку параметров и название ядра можно поправить прямо в BOOT.BIN посредством какого-нибудь редактора, который допускает работу с бинарными файлами (например, <b>hiew</b>, или <b>mc</b> в режиме просмотра). Надо только помнить, что нельзя выйти за границу старой строки. Завершаться строка должна нулевым байтом.)</i><br><br>
+3. Надо обратить внимание на права файлов в rootfs. Например, в архиве, распространяемом сейчас с <a href='http://starterkit.ru'>http://starterkit.ru</a>, файлы пренадлежат не root, и установлен бит suid. Чтобы эта rootfs получилась работоспособной, надо, до <b><code>sudo umount /mnt</code></b>, выполнить<br>
+<pre><code>sudo chown -R root:root /mnt<br>
+</code></pre>
+Следует помнить, что могут быть rootfs с более сложным набором прав, и там нельзя бездумно менять пользователя и группу на root.<br><br>
+4. Второй раздел, возможно, лучше отформатировать в ext3 по причине проблемы с запуском fsck на некоторых платах из-за принудительного монтирования в rw:<br>
+<pre><code>Waiting for root device /dev/mmcblk0p2...<br>
+mmc0: host does not support reading read-only switch. assuming write-enable.<br>
+mmc0: new high speed SDHC card at address b368<br>
+mmcblk0: mmc0:b368 SMI   7.52 GiB <br>
+ mmcblk0: p1 p2 p3<br>
+</code></pre>
+5. Может быть, следует почитать про оптимизацию деления SD-карты на разделы.<br>
+Например <a href='http://blogofterje.wordpress.com/2012/01/14/optimizing-fs-on-sd-card/'>http://blogofterje.wordpress.com/2012/01/14/optimizing-fs-on-sd-card/</a>

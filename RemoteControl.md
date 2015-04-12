@@ -1,0 +1,76 @@
+## Введение ##
+
+Рассматриваются различные варианты дистанционного управления с иcпользованием ОС Linux.
+
+## Bluetooth ##
+
+Дистанционное управление платой например с устройства на Android. Для связи подойдет любой usb bluetooth dongle. Пример для платы imx53-sk c ядром 2.6.35. В первую очередь нужно включить поддержку bluetooth в ядре Linux, выбираем все протоколы
+```
+[*] Networking support  --->
+  <*>   Bluetooth subsystem support  --->
+    <*>   L2CAP protocol support
+    [*]     L2CAP Extended Features support (EXPERIMENTAL)
+    <*>   SCO links support
+    <*>   RFCOMM protocol support
+    [*]     RFCOMM TTY support
+    <*>   BNEP protocol support
+    [*]     Multicast filter support
+    [*]     Protocol filter support
+    <*>   HIDP protocol support
+```
+и поддержку HCI для USB (в том же подменю где протоколы)
+```
+    Bluetooth device drivers  ---> 
+      <*> HCI USB driver
+```
+Еще понадобятся утилиты работающие в пространстве пользователя - bluez-utils, их можно собрать в buildroot. Для упрощения настройки и сборки замените стандартный пакет
+**Внимание** для сопряжения устройств используется потенциально небезопасный метод - устройства будет всегда доступно для подключения и используется простой PIN-код
+```
+cd buildroot-2013.05
+wget http://starterkit-org.googlecode.com/files/bluez_utils.tar.gz -O - | tar zxf - -C ./package
+```
+buildroot-2013.05 написан для примера, подойдет любой.
+Включите в сборку bluez-utils
+```
+Package Selection for the target  --->
+  Networking applications  --->
+    [*] bluez-utils
+    [*]   USB support
+```
+Файлами устройств должен управлять udev
+```
+System configuration  --->
+  /dev management (Dynamic using udev)  --->
+```
+
+Android не имеет стандартных средств для эмуляции HID-совместимого устройства, для этого можно воспользоваться
+[AndroHid](http://code.google.com/p/androhid)
+потребуются права root, котрые можно получить например при помощи
+[Framaroot](http://forum.xda-developers.com/showthread.php?t=2130276)
+
+Для соединения с платой на устройстве с Android нужно включить в настройках bluetooth, запустить поиск устройств и установить сопряжение. PIN-код по умолчанию - "0", его можно изменить на плате в файле /lib/udev/bt\_scan
+```
+#!/bin/sh
+
+PIN=0
+```
+
+<img src='http://wiki.starterkit-org.googlecode.com/git/images/a1.png' width='240' height='400'>
+
+После этого запустить androhid, зайти в меню программы<br>
+<br>
+<img src='http://wiki.starterkit-org.googlecode.com/git/images/a2.png' width='240' height='400'>
+
+Выбрать "Search Device" и после обнаружения платы выбрать ее<br>
+<br>
+<img src='http://wiki.starterkit-org.googlecode.com/git/images/a3.png' width='240' height='400'>
+
+Снова зайти в меню и нажать "Connect"<br>
+<br>
+<img src='http://wiki.starterkit-org.googlecode.com/git/images/a4.png' width='240' height='400'>
+
+После установки соединения в отладочной консоли платы появится сообщение о новом устройстве ввода<br>
+<pre><code>input: HID Keyboard as /class/input/input2<br>
+generic-bluetooth 0005:000A:0000.0001: input: BLUETOOTH HID v0.00 Keyboard [HID Keyboard] on 00:15:83:0B:13:C0<br>
+</code></pre>
+это стандартное устройство ввода так что модификация кода приложений не требуется, они будут воспринимать его как обычную клавиатуру.

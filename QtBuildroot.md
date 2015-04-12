@@ -1,0 +1,280 @@
+## Введение ##
+
+Описание процесса сборки корневой файловой системы c Qt-embedded (работает без Х-сервера напрямую с framebuffer), на примере buildroot-2012.02. Предполагается что выполнены настройка host-системы и собран кросскомпилятор, как описанно в OsSetup и CrosstoolNg.
+
+## Установка buildroot ##
+
+```
+cd ~
+wget http://www.buildroot.net/downloads/buildroot-2012.02.tar.bz2
+tar xjvf buildroot-2012.02.tar.bz2
+cd buildroot-2012.02
+```
+
+дальнейшая настройка подразумевает что мы находимся в корне директории buildroot-2012.02
+
+## Конфигурация корневой файловой системы ##
+
+Есть несколько способов внести изменения в ФС под свои нужды
+
+http://www.buildroot.net/downloads/buildroot.html#custom_targetfs
+
+воспользуемся "стандартным" скелетом и будем вносить свои изменения.
+Сохраняем копию скелета
+```
+cp -r fs/skeleton fs/skeleton_def
+```
+создаем пароль суперпользователя root 123456
+```
+sed -i 's/root::10933:/root:jtmgqWDG61z0.:13514:/' fs/skeleton/etc/shadow
+```
+копируем gdb-server который мы собрали в crosstool-ng
+```
+cp ~/ctng-atmel/arm-atmel-linux-gnueabi/debug-root/usr/bin/gdbserver fs/skeleton/usr/bin/
+```
+копируем настройки локального времени для Москвы
+```
+cp ~/ctng-atmel/arm-atmel-linux-gnueabi/sysroot/usr/share/zoneinfo/Europe/Moscow fs/skeleton/etc/localtime
+```
+прописываем настройки сетевого интерфейса
+```
+printf "\nauto eth0\niface eth0 inet static\naddress 192.168.0.136\nnetmask 255.255.255.0\ngateway 192.168.0.2\n" >> fs/skeleton/etc/network/interfaces
+```
+прописываем DNS сервер google
+```
+rm fs/skeleton/etc/resolv.conf
+echo "nameserver 8.8.8.8" > fs/skeleton/etc/resolv.conf
+```
+указваем в каком порядке резольвить адреса (сначала искать в локальных файлах, затем на сервере DNS)
+```
+echo "hosts:    files dns" > fs/skeleton/etc/nsswitch.conf
+```
+вносим настройки tslib и мышки
+```
+printf "\nexport QWS_MOUSE_PROTO=\"Tslib:/dev/input/event0\"\nexport TSLIB_TSDEVICE=\"/dev/input/event0\"\nexport TSLIB_TSCALIBFILE=\"/etc/pointercal\"\n" >> fs/skeleton/etc/profile
+```
+корректируем конфиг по умолчанию для busybox - для удаленной отладки в Qt Creator нам потребуется pgrep и pkill
+```
+sed -i 's/# CONFIG_PGREP is not set/CONFIG_PGREP=y/' package/busybox/busybox-1.19.x.config
+sed -i 's/# CONFIG_PKILL is not set/CONFIG_PKILL=y/' package/busybox/busybox-1.19.x.config
+```
+
+Если нужна поддержка сторожевого таймера, пропишите в загрузочные скрипты запуск демона - создайте файл fs/skeleton/etc/init.d/S15watchdog с таким содержимым
+```
+#!/bin/sh
+
+case "$1" in
+ start)
+	echo "Starting watchdog..."
+	watchdog -t 5 /dev/watchdog
+	;;
+  stop)
+	;;
+  restart|reload)
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit $?
+```
+и установите права на исполнение для него
+```
+chmod 755 fs/skeleton/etc/init.d/S15watchdog
+```
+
+
+переходим к конфигурированию buidroot
+
+## Конфигурация buildroot ##
+
+Запускаем конфигуратор
+```
+make menuconfig
+```
+базовые настройки
+```
+Target Architecture -> arm
+Target Architecture Variant -> arm926t
+Target ABI -> EABI
+Build options -> оставляем все по умолчанию
+```
+**Примечание:** _если вам нужна отладочная информация в системных библиотеках (например в библиотеках Qt) отключите strip_
+```
+Build options -> strip -> none
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-1.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-1.png)
+
+указываем свой кросскомпилятор
+```
+Toolchain  ->
+  Toolchain type (External toolchain)
+  Toolchain (Custom toolchain)
+  (/home/sasa/ctng-atmel) Toolchain path
+  (arm-atmel-linux-gnueabi) Toolchain prefix
+  External toolchain C library (glibc) 
+  [*] Toolchain has C++ support?
+  [*] Enable MMU support
+  [*] Use software floating point by default
+  (-pipe -march=armv5te -mtune=arm926ej-s) Target Optimizations
+```
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-2.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-2.png)
+
+настройки системы
+```
+System configuration ->
+  /dev management (Dynamic using udev)
+```
+
+**Примечание:** _вместо ttyS0 нужно прописать в качестве порта getty для i.mx23 - ttyAM0, для i.mx53 - ttymxc0_
+
+
+![http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-3.png](http://wiki.starterkit-org.googlecode.com/git/images/Screenshot-buildroot-2012.02-3.png)
+
+Выбор пакетов для корневой ФС
+```
+Package Selection for the target ->
+  Audio and video libraries and applications ->
+    -*- alsa-lib
+    [*] gstreamer
+    [*]   enable gst-debug trace support
+    -*- gst-plugins-base
+```
+для примера в Qt выбран практически полный набор
+```
+Package Selection for the target ->
+  Graphic libraries and applications (graphic/text) ->
+    [*] Qt ->
+      [*]   Approve free license
+      [*]   Gui Module
+        Pixel depths ->
+          [*] 8 bpp, paletted
+          [*] 16 bpp, rgb 5-6-5
+          [*] 32 bpp, argb 8-8-8-8 and rgb 8-8-8
+        Fonts ->
+          [*] micro
+          [*] fixed
+          [*] helvetica
+        freetype2 support (Qt freetype2)
+      [*]     Enable GIF support
+      [*]     Enable libmng support
+      JPEG support (Use Qt bundled libjpeg)
+      PNG support (Use Qt bundled libpng)
+      TIFF support (Use Qt bundled libtiff)
+      [*]   SQL Module ->
+        SQLite 3 support (Qt SQLite)
+      Graphics drivers ->
+        [*] Linux Framebuffer
+      Mouse drivers -> 
+        [*] pc
+        [*] linux input
+        [*] tslib
+      Keyboard drivers ->
+        [*] tty 
+        [*] linux input
+      [*]   Phonon Module
+      [*]   Phonon Module Backend
+      [*]   DBus Module
+      [*]   XML Module
+      [*]     XML Patterns Module
+      [*]   Multimedia Module
+      [*]     QtMultimedia Audio backend
+      [*]   SVG Module
+      -*-   Network Module
+      [*]     WebKit Module
+      [*]   JavaScriptCore JIT compiler
+      [*]   STL support
+      [*]   Enable OpenSSL support
+      [*]   Script Module 
+      [*]     Script Tools Module
+      [*]     Declarative module   
+```
+
+Для автоматизации загрузки проектов на плату и удаленной отладки потребуется ssh сервер, возможно использовать минималистичный dropbear, я выбираю openssh потому что тестировал с ним
+```
+Package Selection for the target ->
+  Networking applications ->
+    [*] openssh
+```
+Для работы с nand потребуется набор утилит mtd-utils
+```
+Package Selection for the target ->
+  Hardware handling ->
+    [*] mtd/jffs2 utilities
+```
+В качестве имиджа корневой ФС создаем простой архив tar.gz
+```
+Filesystem images ->
+  [*] tar the root filesystem
+    Compression method (gzip)
+```
+Оставляем в Host utilities все по умолчанию - ничего не выбираем.
+Загрузчик не собираем - воспользуемся отдельным не из состава buildroot, так что Bootloaders так же пропускаем.
+Правила для ядра
+```
+Kernel -> 
+  [*] Linux Kernel
+  Kernel version (Custom version)
+  (3.2.18) Kernel version
+  Custom kernel patches -> 
+    скопируйте и вставьте эти две ссылки через пробел
+    http://www.kernel.org/pub/linux/kernel/projects/rt/3.2/older/patch-3.2.18-rt29.patch.bz2
+    http://starterkit-org.googlecode.com/files/linux-3.2.18-oem.patch
+  Kernel configuration (Using a defconfig)
+  (at91sam9g45sd7) Defconfig name
+  Kernel binary format (uImage)
+```
+
+http://starterkit-org.googlecode.com/files/linux-3.2.18-oem.patch - патч для платы Startterkit SK-9G45-OEM, at91sam9g45sd7 - конфиг для корневой на SD и 7" TFT панели, для 4" панели наберите в этом поле at91sam9g45sd4.
+Конфигурация закончена, выбиаем Exit в главном окне, на вопрос
+Do you wish to save your new configuration? отвечаем < Yes >
+
+Конфиг который получился в итоге можно взять тут [qt\_br.config](http://wiki.starterkit-org.googlecode.com/git/configs/qt_br.config)
+
+Сборка
+```
+make
+```
+
+Qt будет собираться достаточно долго - у меня больше 3 часов (если вам что-то не нужно из модулей - вы можете их не включать в конфиг, особенно долго собирается QtWebkit). По окончании сборки имиджи ядра и корневой ФС находятся в директории output/images/.
+
+## Конфигурация ядра ##
+
+После окончания сборки системы можно дополнительно сконфигурировать ядро под свои нужды
+```
+make linux-menuconfig
+```
+например, чтобы собрать ядро с полной вытесняющей многозадачностью
+```
+Kernel Features ->
+  Preemption Model (Fully Preemptible Kernel (RT))
+```
+включить поддержку сторожевого таймера
+```
+Device Drivers  --->
+  [*] Watchdog Timer Support  --->
+    [*]   WatchDog Timer Driver Core
+    [*]   Disable watchdog shutdown on close
+    <*>   AT91SAM9X / AT91CAP9 watchdog
+```
+пересобираем ядро (динамические модули автоматически добавятся в корневую ФС)
+```
+make
+```
+
+## Конфигурация busybox ##
+
+После сборке корневой ФС можно дополнительно сконфигурировать busybox, так же как ядро. Например вместо правки конфига по умолчанию, которое было сделано в начале статьи при помощи sed, можно включить поддержку pgrep и pkill
+```
+make busybox-menuconfig
+Process Utilities ->
+  [*] pgrep
+  [*] pkill
+```
+выходим с сохранением конфига и собираем
+```
+make
+```

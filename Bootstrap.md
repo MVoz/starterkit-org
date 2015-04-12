@@ -1,0 +1,129 @@
+# Введение #
+
+Начальный загрузчик atmel bootstrap позволяет загружать ядро Linux напрямую (в последних версиях появилась поддержка Device tree), а также standalone код (включая u-boot) с различных внешних накопителей - SD, NAND (DataFlash на платах starterkit с процессором at91sam9g45 не используется).
+
+## AT91Bootstrap v3.0 ##
+
+Описания для версии 3.5.2, [оригинал](http://repository.timesys.com/buildsources/a/at91bootstrap-3/at91bootstrap-3-3.5.2). Скачиваем оригинал (продублирован на googlecode.com)
+```
+mkdir -p ~/work
+cd ~/work
+wget http://starterkit-org.googlecode.com/files/at91bootstrap-3-3.5.2.tar.gz
+tar xzvf at91bootstrap-3-3.5.2.tar.gz
+```
+Добавляем starterkit-специфичный патч - исправляет геометрию внешней памяти DDR2 и сброс аудиокодека AC97
+```
+wget http://starterkit-org.googlecode.com/files/at91bootstrap-3-3.5.2-sk.patch
+cd at91bootstrap-3-3.5.2
+patch -p1 < ../at91bootstrap-3-3.5.2-sk.patch
+```
+На данный момент конфигурация SDR не добавлена - bootsrap может быть использован с любым из вариантов плат на базе at91sam9g45.
+
+## Конфигурация ##
+
+В составе boostrap есть предопределенные конфиги, которые находятся в директории
+```
+at91bootstrap-3-3.5.2/board/at91sam9m10g45ek
+```
+Перед конфигурацией и сборкой нужно указать КК через переменную окружения CROSS\_COMPILE, например для [кросскомпилятора](CrosstoolNg.md) который вы собрали сами
+```
+export CROSS_COMPILE=arm-atmel-linux-gnueabi-
+```
+Перед сборкой рекомендуется очистить дерево исходников от результатов предыдущей сборки
+```
+make mrproper
+```
+
+**Для загрузки ядра Linux с SD** напрямую (без u-boot)
+```
+make at91sam9m10g45eksd_linux_defconfig
+```
+После дефолтного конфига конфигурацию можно скорректировать под свои нужды
+```
+make menuconfig
+```
+Например изменить название имиджа ядра и параметры загрузки
+```
+Linux Image Storage Setup  --->
+  (mem=64M console=ttyS0,115200 root=/dev/mmcblk0p2 rootwait) Linux kernel parameters
+  (uImage) Binary Name on SD Card
+```
+
+**Для загрузки u-boot из NAND**
+```
+make at91sam9m10g45eknf_uboot_defconfig
+```
+Раскладка NAND на платах starterkit незначительно отличается от оригинальной atmel, нужно скорректировать адрес куда записан u-boot и размер раздела (имиджа)
+```
+make menuconfig
+```
+```
+U-Boot Image Storage Setup  --->
+  (0x00020000) Flash Offset for U-Boot
+  (0x00040000) U-Boot Image Size
+```
+По умолчанию сторожевой таймер отключен, чтобы включить - снимите звёздочку в строке меню
+```
+[ ] Disable Watchdog
+```
+
+## Сборка ##
+
+Непосредственно сборка выполняется командой make
+```
+make
+```
+После сборки бинарниый файл загрузчика находится в директории at91bootstrap-3-3.5.2/binaries и имеет расширение .bin, например bootstrap для загрузки u-boot из NAND - at91sam9m10g45ek-nandflashboot-uboot-3.5.2.bin
+
+## Копирование на носитель ##
+
+**SD**
+
+Загрузчик должен находиться на первом разделе с файловой системой FAT и иметь название BOOT.BIN (обратите внимание - заглавные буквы). Например для SD, которая на хост-системе определилась как sdb
+```
+sudo mount /dev/sdb1 /mnt
+sudo cp ~/work/at91bootstrap-3-3.5.2/binaries/at91sam9m10g45ek-sdcardboot-linux-3.5.2.bin /mnt/BOOT.BIN
+sudo umount /mnt
+```
+
+**NAND**
+
+Atmel SAM-BA In-system Programmer. Позволяет восстановить загрузчик "с нуля". На сайте atmel для скачивания требуется регистрация, без регистрации :) можно взять локальную копию
+```
+cd ~/work
+wget http://starterkit-org.googlecode.com/files/sam-ba_2.12.zip
+unzip sam-ba_2.12.zip
+cd sam-ba_cdc_cdc_linux
+```
+
+Чтобы активировать встроенный загрузчик SAM-BA
+  * Отключите БП
+  * Разомкните перемычку NAND\_CS
+  * Извлеките SD из кардридера платы
+  * Соедините USB-DEVICE порт платы с USB-HOST PC с Linux (хост-система)
+  * Убедитесь что процессор перешел в режим загрузки по USB
+```
+lsusb | grep Atmel
+Bus 001 Device 006: ID 03eb:6124 Atmel Corp. at91sam SAMBA bootloader
+```
+  * Запустите программатор SAM-BA
+```
+./sam-ba
+```
+  * Выбеите порт и плату
+  * Нажмите Connect
+![http://wiki.starterkit-org.googlecode.com/git/images/samba1.png](http://wiki.starterkit-org.googlecode.com/git/images/samba1.png)
+  * Замкните перемычку NAND\_CS
+  * Перейдите на вкладку DDRAM и выполните инициализацию внешней памяти (
+```
+Scripts --> Enable DDRAM --> Execute
+```
+![http://wiki.starterkit-org.googlecode.com/git/images/samba2.png](http://wiki.starterkit-org.googlecode.com/git/images/samba2.png)
+  * Перейдите на вкладку NandFlash и выполните инициализацию NAND
+```
+Scripts --> Enable NandFlash --> Execute
+```
+![http://wiki.starterkit-org.googlecode.com/git/images/samba3.png](http://wiki.starterkit-org.googlecode.com/git/images/samba3.png)
+  * Выберите бинарный файл загрузчика и нажмите Send File
+![http://wiki.starterkit-org.googlecode.com/git/images/samba4.png](http://wiki.starterkit-org.googlecode.com/git/images/samba4.png)
+  * Выйдите из программатора SAM-BA и отключите кабель USB

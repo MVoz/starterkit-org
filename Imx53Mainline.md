@@ -1,0 +1,267 @@
+## Введение ##
+
+Описание для плат SK-iMX53 ревизии V3.B. Ядро взято из [BSP tqma53](http://support.tq-group.com/doku.php?id=en:arm:tqma53:linux:downloads) с патчами [Pengutronix](http://www.pengutronix.de/index_en.html), которые не входят в настоящий момент в ванильное ядро (поддержка GPU, LDB, CSI).
+**Внимание** При замене u-boot и ядра на NAND будут утеряны все старые данные, потребуется заново создать ФС.
+
+## Настройка переменных окружения ##
+
+Для кросскомпиляции u-boot и ядра Linux требуется указать кросскомпилятор который будет использоваться и целевую архитектуру. Если вы будете делать в одном терминале - это достаточно сделать один раз.
+
+```
+export CROSS_COMPILE=arm-none-linux-gnueabi-
+```
+
+Если путь к КК не прописан в переменной окружения PATH, укажите полный путь, например для КК [Linaro armel](https://launchpad.net/linaro-toolchain-binaries/trunk/2012.04/+download/gcc-linaro-arm-linux-gnueabi-2012.04-20120426_linux.tar.bz2) который распакован у меня в директории /home/sasa/imx/mainline
+
+```
+export CROSS_COMPILE=/home/sasa/imx/mainline/gcc-linaro-arm-linux-gnueabi-2012.04-20120426_linux/bin/arm-linux-gnueabi-
+```
+```
+export ARCH=arm
+```
+
+## imx-usb-loader ##
+
+Чтобы избавиться от Windows и MFG-tools можно использовать утилиту [imx-usb-loader](http://git.pengutronix.de/?p=tools/imx-usb-loader.git;a=summary) которая позволяет загружать код через USB-OTG работая в Linux. Перед сборкой нужно установить пакет libusb с файлами для разработки, в случае Ubuntu 10.04
+```
+sudo apt-get install libusb-dev
+```
+для других дистрибутивах - уточните в соответствующих руководствах. Сборка
+```
+mkdir -p ~/work
+cd ~/work
+git clone git://git.pengutronix.de/git/tools/imx-usb-loader.git
+cd imx-usb-loader
+make
+```
+
+## U-boot ##
+
+На данный момент u-boot разрабатываемый сообществом намного мощней и гибче устаревшей версии 2009.08 которая поставляется с BSP Freescale, к тому же для полноценной работы для актуальных ядер с kernel.org требуется поддержка Device tree - унифицированный метод описания устройств и конфигурации аппаратных ресурсов.
+
+**Внимание** С новым u-boot ядро Freescale 2.6.35 стартовать не будет, возможна загрузка нового ядра со старым загрузчиком, это будет описано далее
+
+```
+cd ~/work
+wget ftp://ftp.denx.de/pub/u-boot/u-boot-2013.07.tar.bz2
+wget http://starterkit-org.googlecode.com/files/u-boot-imx-sk.patch
+tar xjvf u-boot-2013.07.tar.bz2
+cd ./u-boot-2013.07
+patch -p1 < ../u-boot-imx-sk.patch
+```
+
+Сборка образа для загрузки из NAND
+```
+make distclean
+make sk-imx53_config
+make
+```
+
+копируем его в корень tftp сервера чтобы была возможность обновить его по сети
+```
+cp u-boot-with-nand-spl.imx /tftpboot
+```
+
+Собираем образ u-boot для загрузки через USB-OTG порт
+```
+make u-boot.imx
+```
+
+**Примечания**
+
+> Файлы cпецифичные для плат starterkit находятся в директории
+```
+u-boot-2013.07/board/starterkit
+```
+Конфиг для платы SK-IMX53
+```
+u-boot-2013.07/include/configs/sk-imx53.h
+```
+Частоту ядра можно изменить в конфиге, возможные значения 800, 1000 и 1200 МГц
+```
+/* cpu clock MHz: 800,1000,1200 */
+#define CONFIG_SK_IMX53_CPUCLK	1200 
+```
+В конфиге прописаны переменные окружения, которые вы можете изменить под свои нужды.
+```
+#define	CONFIG_EXTRA_ENV_SETTINGS					\
+		"ipaddr=192.168.0.136\0" \
+		"netmask=255.255.255.0\0" \
+.......
+```
+По умолчанию параметры передаваемые ядру предполагают что корневая ФС находится в NAND
+```
+#define CONFIG_BOOTARGS		"noinitrd console=ttymxc0,115200 ubi.mtd=6 root=ubi0:rootfs rootfstype=ubifs rw"
+```
+
+```
+#define MTDPARTS_DEFAULT			\
+	"mtdparts=mxc-nand:"			\
+		"1m(bootloader),"		\
+		"512k(environment),"		\
+		"512k(redundant-environment),"	\
+		"4m(kernel),"			\
+		"128k(fdt),"			\
+		"8m(ramdisk),"			\
+		"-(filesystem)"
+```
+определяет границы разделов NAND для u-boot и читаемыые имена. Это удобно для написания загрузочных скриптов - не нужно помнить числа. Например скрипт обновления u-boot по tftp выглядит так
+```
+		"uboot_update=mtdparts default; tftp u-boot-with-nand-spl.imx; " \
+			"nand erase.part bootloader; nand write ${fileaddr} bootloader ${filesize}\0" \
+```
+здесь mtdparts default делает "видимыми" имена разделов прописанных по умолчанию для команд работающих с подсистемой MTD, после этого к разделам можно обращаться по именам, в частности nand erase.part bootloader очищает раздел содержащий загрузчик. Я не нашел - можно ли эту таблицу разделов автоматически передать ядру, поэтому аналогичная таблица прописана в device tree, исходники которого находятся в ядре linux-3.9/arch/arm/boot/dts/imx53-sk.dts
+
+## Ядро Linux ##
+
+Скачиваем и распаковывем архив ванильного ядра с kernel.org, предварительно установите архиватор LZMA, в случае Ubuntu 10.04
+```
+sudo apt-get install xz-utils
+```
+
+```
+cd ~/work
+wget https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.9.tar.xz
+tar xJvf linux-3.9.tar.xz
+cd linux-3.9
+```
+Архив с патчами Pengutronix и поддержкой плат Starterkit
+```
+wget http://starterkit-org.googlecode.com/files/linux-3.9-patches.tar.bz2
+tar xjvf linux-3.9-patches.tar.bz2
+```
+для простоты в архиве есть скрипт для наложения серии патчей, запускаем его
+```
+./linux-3.9-patches/patch.sh
+```
+Конфиг по умолчанию для платы SK-IMX53 (находится в arch/arm/configs/sk\_imx53\_defconfig)
+```
+make sk_imx53_defconfig
+```
+Сборка
+```
+make -j2
+```
+
+-j2 указывает сколько параллельных потоков при сборке проекта может использовать утилита make. После окончания сборки копируем сжатый образ ядра и блоб device tree с описанием и конфигурацией устройств платы в корень tftp-сервера
+```
+cp arch/arm/boot/zImage /tftpboot
+cp arch/arm/boot/dts/imx53-sk.dtb /tftpboot
+```
+
+**Примечания**
+
+По умолчанию в dts прописаны тайминги для 7" панели SK-ATM0700D4-Plug, графический вывод через LDB (lvds).
+Для SDMA и VPU потребуются фирмвари, **фирмвари из BSP Freeacale с новым ядром работать не будут**, взять их можно тут
+```
+wget http://starterkit-org.googlecode.com/files/firmware.tar.bz2
+```
+Их нужно распаковать в директорию /lib корневой системы, например
+```
+tar xjvf firmware.tar.bz2 -C /rootfs_mnt_point/lib
+```
+где rootfs\_mnt\_point - директория к которой примонтирована корневая ФС. Мне не удалось их подгрузить используя mdev или udev с корневой собранной в buildroot, при этом если использовать systemd в качестве системы инициализации - все работает.
+Чтобы избавиться от systemd, можно собрать ядро с встроенными прошивками
+```
+cd ~/work/linux-3.9
+wget http://starterkit-org.googlecode.com/files/firmware.tar.bz2
+tar xjvf firmware.tar.bz2 
+make ARCH=arm menuconfig
+```
+В опициях конфигуратора выберите такие пункты
+```
+Device Drivers  --->
+  Generic Driver Options  --->
+    [*]   Include in-kernel firmware blobs in kernel binary
+    (imx/sdma/sdma-imx53.bin v4l-coda7541-imx53.bin) External firmware blobs to build into the kernel
+    (firmware) Firmware blobs root directory
+```
+После этого пересобрать ядро.
+
+**Чтобы загрузить новое ядро старым загрузчиком** нужно подготовить специальный образ, необходимые опции включены в конфиге по умолчанию. После сборки ядра, выполните
+```
+cat arch/arm/boot/zImage arch/arm/boot/dts/imx53-sk.dtb > zImage_dtb
+mkimage -A arm -O linux -C none -T kernel -a 0x70008000 -e 0x70008000 -n linux-2.6 -d zImage_dtb uImage
+cp uImage /tftpboot
+```
+Предполагается что утилита mkimage есть в путях переменной окружения PATH, например в ubuntu 10.04 можно установить командой
+```
+sudo apt-get install uboot-mkimage
+```
+
+
+## Прошивка u-boot ##
+Для прошивки загрузчика в NAND специальная утилита Freescale kobs-ng больше не требуется. Это можно сделать двумя способами
+
+1 Используя Linux и набор утилит mtdutils.
+
+Включить плату и залогиниться в терминале. Загрузить образ по tftp
+```
+tftp -g -r u-boot-with-nand-spl.imx 192.168.0.2
+```
+прошить образ
+```
+flash_erase /dev/mtd0 0 0
+nandwrite -p /dev/mtd0 u-boot-with-nand-spl.imx
+```
+2 Используя u-boot загруженный через USB-OTG.
+
+Этот способ позволяет восстановить содержимое NAND "с нуля". Для загрузки потребуется кабель USB AM-AM, патч-корд ethernet для загрузки файлов по tftp, для ввода команд u-boot - эмулятор терминала работающий через последовательный порт.
+
+  * Отключите питание платы
+  * Разомкните перемычки J13, J14 чтобы изолировать цепь +5 В USB от БП
+  * Разомкните перемычку J7 (NAND CS) чтобы активировать протокол последовательной загрузки через USB
+  * Соедините кабелем USB AM-AM отладочную плату (разъем X16) c PC
+  * Включите питание платы с БП
+  * Проверьте, что процессор перешел в режим последовательной загрузки, для этого на PC с Linux просмотрите имеющиеся устройства USB
+```
+lsusb | grep Freescale
+Bus 002 Device 008: ID 15a2:004e Freescale Semiconductor, Inc.  
+```
+  * Замкните перемычку J7 (NAND CS)
+  * Выполните команду на PC с Linux
+```
+sudo ~/work/imx-usb-loader/imx-usb-loader ~/work/u-boot-2013.07/u-boot.imx
+```
+  * в эмуляторе терминала должны появиться сообщения u-boot и 3 секундный отсчет перед загрузкой системы, нужно остановить загрузку нажатием любой клавиши
+  * чтобы загрузить по tftp и прошить новый загрузчик в NAND, введите команду в консоли u-boot
+```
+==> run uboot_update
+```
+этой же командой можно обновить u-boot если в NAND уже прошита новая версия.
+
+## Прошивка ядра ##
+
+Чтобы загрузить ядро по tftp и записать на NAND, выполните скрипт в u-boot
+```
+==> run kern_update  
+```
+Для обновления бинарного файла device tree
+```
+==> run dtb_update
+```
+
+## Прошивка корневой ФС ##
+
+Чтобы загрузить по tftp и записать имидж корневой ФС UBIFS, выполните скрипт в u-boot
+```
+run fs_update
+```
+предполагается что имидж имеет название rootfs.ubi. Чтобы получить его автоматически при сборке buildroot необходимо в конфигураторе buildroot укзать что нужно его создать
+```
+Filesystem images  --->
+  [*] ubifs root filesystem 
+```
+и указать параметры NAND
+```
+  (0x1f800) UBI logical erase block size
+  (0x800) UBI minimum I/O size
+  (1935) Maximum LEB count
+    ubifs runtime compression (lzo)  --->
+    Compression method (no compression)  --->
+  [*]   Embed into an UBI image
+  (0x20000) UBI physical erase block size
+  (512)   UBI sub-page size
+```
+
+Для теста можно воспользоваться [готовой корневой tqma53](http://www.tq-group.com/uploads/tx_abdownloads/files/OSELAS.BSP-TQ-TQMA53.0105.images.tar.gz) Там есть патченый gstreamer-0.11 для работы с VPU, к сожалению мне не удалось вывести на экран видео [как описано у них в wiki](http://support.tq-group.com/doku.php?id=en:arm:tqma53:linux:how_to#use_the_vpu_of_imx53)
